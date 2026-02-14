@@ -10,7 +10,7 @@
   "homepage": "https://github.com/shayshahar/homebridge-iec-electricity#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/shayshahar/homebridge-iec-electricity.git"
+    "url": "git+https://github.com/shayshahar/homebridge-iec-electricity.git"
   },
   "bugs": {
     "url": "https://github.com/shayshahar/homebridge-iec-electricity/issues"
