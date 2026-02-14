@@ -6,7 +6,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 
 // Constants from py-iec-api
@@ -14,8 +13,6 @@ const APP_CLIENT_ID = process.env.IEC_CLIENT_ID || '0oaqf6zr7yEcQZqqt2p7';
 const CODE_CHALLENGE_METHOD = 'S256';
 const APP_REDIRECT_URI = process.env.IEC_REDIRECT_URI || 'com.iecrn:/';
 const IEC_OKTA_BASE_URL = process.env.IEC_OKTA_BASE_URL || 'https://iec-ext.okta.com';
-const JWKS_URL = `${IEC_OKTA_BASE_URL}/oauth2/default/v1/keys`;
-
 // IEC API base URL (must match py-iec-api: https://iecapi.iec.co.il/api/)
 const IEC_API_BASE_URL = 'https://iecapi.iec.co.il/api/';
 
@@ -177,7 +174,9 @@ export class IecClient {
 
   /** Log full API response when logApiData is enabled (for development / new sensors) */
   private logApiResponse(apiName: string, data: unknown): void {
-    if (!this.logApiData) return;
+    if (!this.logApiData) {
+      return;
+    }
     const json = JSON.stringify(data, null, 2);
     console.log(`\n[IEC API] ---------- ${apiName} (full response) ----------\n${json}\n[IEC API] ---------- end ${apiName} ----------\n`);
   }
@@ -248,7 +247,7 @@ export class IecClient {
       this.stateToken = data.stateToken;
       const factors = data._embedded?.factors;
       if (!factors || factors.length === 0) {
-        console.error(`[IEC Client] No factors found in response`);
+        console.error('[IEC Client] No factors found in response');
         throw new IECLoginError(-1, 'No authentication factors found');
       }
       
@@ -263,7 +262,7 @@ export class IecClient {
       });
       console.log(`[IEC Client] Step 2: Sending OTP request to ${verifyUrl}`);
       console.log(`[IEC Client] Verify request body: ${verifyBody}`);
-      console.log(`[IEC Client] This should trigger OTP to be sent to user's registered device`);
+      console.log('[IEC Client] This should trigger OTP to be sent to user\'s registered device');
 
       const otpResponse = await fetch(verifyUrl, {
         method: 'POST',
@@ -275,7 +274,7 @@ export class IecClient {
       });
 
       console.log(`[IEC Client] OTP response status: ${otpResponse.status} ${otpResponse.statusText}`);
-      console.log(`[IEC Client] OTP response headers:`, JSON.stringify(Object.fromEntries(otpResponse.headers.entries())));
+      console.log('[IEC Client] OTP response headers:', JSON.stringify(Object.fromEntries(otpResponse.headers.entries())));
 
       const otpResponseText = await otpResponse.text();
       console.log(`[IEC Client] OTP response body (full): ${otpResponseText}`);
@@ -299,11 +298,11 @@ export class IecClient {
         throw new IECLoginError(-1, `Invalid response from OTP endpoint: ${otpResponseText.substring(0, 200)}`);
       }
       
-      console.log(`[IEC Client] Parsed OTP data:`, JSON.stringify(otpData, null, 2));
+      console.log('[IEC Client] Parsed OTP data:', JSON.stringify(otpData, null, 2));
       console.log(`[IEC Client] OTP response status: ${otpData.status}`);
       console.log(`[IEC Client] Has sessionToken: ${!!otpData.sessionToken}`);
       console.log(`[IEC Client] Factor type: ${otpData._embedded?.factor?.factorType}`);
-      console.log(`[IEC Client] Factor profile:`, JSON.stringify(otpData._embedded?.factor?.profile));
+      console.log('[IEC Client] Factor profile:', JSON.stringify(otpData._embedded?.factor?.profile));
       
       // Check if status indicates OTP was sent
       if (otpData.status === 'MFA_CHALLENGE' || otpData.status === 'SUCCESS') {
@@ -324,7 +323,7 @@ export class IecClient {
       }
 
       if (!this.otpFactorType || this.otpFactorType === 'unknown') {
-        console.warn(`[IEC Client] Warning: Could not determine OTP delivery method`);
+        console.warn('[IEC Client] Warning: Could not determine OTP delivery method');
       }
 
       console.log(`[IEC Client] Login initiation completed. OTP factor type: ${this.otpFactorType}`);
@@ -341,13 +340,13 @@ export class IecClient {
    * Verify OTP code and get JWT token
    */
   async verifyOtp(otpCode: string): Promise<void> {
-    console.log(`[IEC Client] Starting OTP verification...`);
+    console.log('[IEC Client] Starting OTP verification...');
     console.log(`[IEC Client] Factor ID: ${this.factorId}, State Token: ${this.stateToken ? 'present' : 'missing'}`);
     console.log(`[IEC Client] OTP code length: ${otpCode.length}, value: ${otpCode.replace(/./g, '*')}`);
     
     if (!this.factorId || !this.stateToken) {
-      console.error(`[IEC Client] ERROR: Missing factorId or stateToken!`);
-      throw new IECLoginError(-1, "OTP wasn't sent during login");
+      console.error('[IEC Client] ERROR: Missing factorId or stateToken!');
+      throw new IECLoginError(-1, 'OTP wasn\'t sent during login');
     }
 
     try {
@@ -392,9 +391,10 @@ export class IecClient {
         verifyData = (await verifyResponse.json()) as typeof verifyData;
       } catch (parseError) {
         const responseText = await verifyResponse.text();
+        const msg = parseError instanceof Error ? parseError.message : String(parseError);
         throw new IECLoginError(
           -1,
-          `Failed to parse OTP verification response: ${parseError instanceof Error ? parseError.message : String(parseError)}. Response: ${responseText.substring(0, 300)}`,
+          `Failed to parse OTP verification response: ${msg}. Response: ${responseText.substring(0, 300)}`,
         );
       }
 
@@ -421,12 +421,12 @@ export class IecClient {
 
       const authorizeUrl = `${IEC_OKTA_BASE_URL}/oauth2/default/v1/authorize?` +
         `client_id=${APP_CLIENT_ID}&` +
-        `response_type=id_token+code&` +
-        `response_mode=form_post&` +
-        `scope=openid%20email%20profile%20offline_access&` +
+        'response_type=id_token+code&' +
+        'response_mode=form_post&' +
+        'scope=openid%20email%20profile%20offline_access&' +
         `redirect_uri=${encodeURIComponent(APP_REDIRECT_URI)}&` +
         `state=${state}&` +
-        `nonce=abc123&` +
+        'nonce=abc123&' +
         `code_challenge_method=${CODE_CHALLENGE_METHOD}&` +
         `sessionToken=${otpSessionToken}&` +
         `code_challenge=${codeChallenge}`;
@@ -529,14 +529,14 @@ export class IecClient {
 
       if (exp && exp < now) {
         // Token expired, refresh it
-        console.log(`[IEC Client] Token expired, refreshing...`);
+        console.log('[IEC Client] Token expired, refreshing...');
         await this.refreshToken();
-        console.log(`[IEC Client] Token refreshed successfully`);
+        console.log('[IEC Client] Token refreshed successfully');
       } else if (exp && exp - now < 300) {
         // Token expires in less than 5 minutes, refresh proactively
         console.log(`[IEC Client] Token expires soon (${exp - now}s), refreshing proactively...`);
         await this.refreshToken();
-        console.log(`[IEC Client] Token refreshed proactively`);
+        console.log('[IEC Client] Token refreshed proactively');
       }
 
       return true;
@@ -639,7 +639,7 @@ export class IecClient {
       console.log(`[IEC Client] Token full length: ${this.token.id_token.length} chars`);
       
       const requestHeaders = getIecApiHeaders(this.token.id_token);
-      console.log(`[IEC Client] Request headers:`, JSON.stringify({ ...requestHeaders, authorization: 'Bearer ***' }, null, 2));
+      console.log('[IEC Client] Request headers:', JSON.stringify({ ...requestHeaders, authorization: 'Bearer ***' }, null, 2));
       
       const response = await fetch(GET_CONSUMER_URL, {
         method: 'GET',
@@ -647,7 +647,7 @@ export class IecClient {
       });
 
       console.log(`[IEC Client] Customer API response status: ${response.status} ${response.statusText}`);
-      console.log(`[IEC Client] Response headers:`, JSON.stringify(Object.fromEntries(response.headers.entries()), null, 2));
+      console.log('[IEC Client] Response headers:', JSON.stringify(Object.fromEntries(response.headers.entries()), null, 2));
 
       const responseText = await response.text();
       console.log(`[IEC Client] Customer API response body (full): ${responseText}`);
@@ -660,7 +660,7 @@ export class IecClient {
           console.log(`[IEC Client] Token appears invalid (${response.status}), attempting refresh...`);
           try {
             await this.refreshToken();
-            console.log(`[IEC Client] Token refreshed, retrying customer request...`);
+            console.log('[IEC Client] Token refreshed, retrying customer request...');
             // Retry once after refresh
             const retryResponse = await fetch(GET_CONSUMER_URL, {
               method: 'GET',
@@ -669,11 +669,10 @@ export class IecClient {
             
             if (!retryResponse.ok) {
               const retryErrorText = await retryResponse.text().catch(() => '');
-              const retryErrorText2 = await retryResponse.text().catch(() => '');
-            console.error(`[IEC Client] Retry after refresh failed - Status: ${retryResponse.status}, Response: ${retryErrorText2}`);
-            throw new IECError(
+              console.error(`[IEC Client] Retry after refresh failed - Status: ${retryResponse.status}, Response: ${retryErrorText}`);
+              throw new IECError(
                 retryResponse.status,
-                `Failed to get customer after token refresh: ${retryResponse.statusText}. ${retryErrorText2.substring(0, 200)}`,
+                `Failed to get customer after token refresh: ${retryResponse.statusText}. ${retryErrorText.substring(0, 200)}`,
               );
             }
             
@@ -681,20 +680,20 @@ export class IecClient {
             console.log(`[IEC Client] Retry response body: ${retryResponseText}`);
             const retryData = JSON.parse(retryResponseText) as Customer;
             this.bpNumber = retryData.bpNumber ?? retryData.bp_number;
-            console.log(`[IEC Client] Customer data retrieved successfully after token refresh`);
+            console.log('[IEC Client] Customer data retrieved successfully after token refresh');
             return retryData;
           } catch (refreshError) {
             console.error(`[IEC Client] Token refresh failed: ${refreshError instanceof Error ? refreshError.message : String(refreshError)}`);
-            throw new IECLoginError(-1, `Token expired and refresh failed. Please re-authenticate.`);
+            throw new IECLoginError(-1, 'Token expired and refresh failed. Please re-authenticate.');
           }
         }
         
         // For 404, check if it's actually an authentication issue or wrong endpoint
         if (response.status === 404) {
-          console.error(`[IEC Client] 404 Not Found - This could mean:`);
-          console.error(`[IEC Client] 1. The API endpoint is incorrect`);
-          console.error(`[IEC Client] 2. The user account doesn't exist`);
-          console.error(`[IEC Client] 3. The token doesn't have access to this resource`);
+          console.error('[IEC Client] 404 Not Found - This could mean:');
+          console.error('[IEC Client] 1. The API endpoint is incorrect');
+          console.error('[IEC Client] 2. The user account doesn\'t exist');
+          console.error('[IEC Client] 3. The token doesn\'t have access to this resource');
           console.error(`[IEC Client] Response body: ${responseText}`);
         }
         
@@ -714,7 +713,7 @@ export class IecClient {
       this.logApiResponse('customer', customer);
       this.bpNumber = customer.bpNumber ?? customer.bp_number;
       if (!this.bpNumber) {
-        console.error(`[IEC Client] Customer response missing BP number. Keys:`, Object.keys(customer));
+        console.error('[IEC Client] Customer response missing BP number. Keys:', Object.keys(customer));
         throw new IECError(-1, 'Customer response missing bpNumber');
       }
       console.log(`[IEC Client] Customer data parsed successfully. BP Number: ${this.bpNumber}`);
@@ -972,12 +971,14 @@ export class IecClient {
       const meterList = (data.meterList ?? data.meter_list ?? []) as Array<Record<string, unknown>>;
       
       if (meterList.length === 0) {
-        console.log(`[IEC Client] Monthly usage response has no meterList. Top-level keys: ${Object.keys(raw).join(',')}`);
+        const keys = Object.keys(raw).join(',');
+        console.log(`[IEC Client] Monthly usage response has no meterList. Top-level keys: ${keys}`);
         return null;
       }
 
       const meter = meterList[0];
-      const futureInfo = (meter.futureConsumptionInfo ?? meter.future_consumption_info) as { futureConsumption?: number; future_consumption?: number } | undefined;
+      type FutureInfo = { futureConsumption?: number; future_consumption?: number };
+      const futureInfo = (meter.futureConsumptionInfo ?? meter.future_consumption_info) as FutureInfo | undefined;
       const usage =
         (futureInfo?.futureConsumption ?? futureInfo?.future_consumption) as number | undefined ??
         (meter.totalConsumptionForPeriod as number | undefined) ??

@@ -14,9 +14,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 /** Plugin root: directory containing dist/ and homebridge-ui/ */
 function getPluginRoot() {
   const fromScript = join(__dirname, '..');
-  if (existsSync(join(fromScript, 'dist', 'iec-client.js'))) return fromScript;
+  if (existsSync(join(fromScript, 'dist', 'iec-client.js'))) {
+    return fromScript;
+  }
   const fromCwd = join(process.cwd(), 'node_modules', 'homebridge-iec-electricity');
-  if (existsSync(join(fromCwd, 'dist', 'iec-client.js'))) return fromCwd;
+  if (existsSync(join(fromCwd, 'dist', 'iec-client.js'))) {
+    return fromCwd;
+  }
   return fromScript;
 }
 

@@ -4,6 +4,15 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   { ignores: ['dist/**'] },
   {
+    files: ['homebridge-ui/**/*.js'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+      },
+    },
+  },
+  {
     rules: {
       'quotes': ['error', 'single'],
       'indent': ['error', 2, { SwitchCase: 0 }],

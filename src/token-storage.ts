@@ -27,7 +27,9 @@ export function getCurrentUserIdPath(): string {
 export function readCurrentUserId(): string | null {
   try {
     const path = getCurrentUserIdPath();
-    if (!existsSync(path)) return null;
+    if (!existsSync(path)) {
+      return null;
+    }
     const data = readFileSync(path, 'utf-8');
     const obj = JSON.parse(data) as { userId?: string };
     const id = obj.userId && String(obj.userId).trim();
@@ -57,7 +59,9 @@ export function saveCurrentUserId(userId: string): void {
 export function deleteCurrentUserId(): void {
   try {
     const path = getCurrentUserIdPath();
-    if (existsSync(path)) unlinkSync(path);
+    if (existsSync(path)) {
+      unlinkSync(path);
+    }
   } catch {
     // Ignore
   }

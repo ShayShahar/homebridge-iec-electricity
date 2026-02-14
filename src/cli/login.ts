@@ -34,7 +34,7 @@ async function login(userId: string, tokenPath?: string): Promise<boolean> {
     await client.saveTokenToFile(finalTokenPath);
 
     console.log(`\n✅ Login successful! Token saved to ${finalTokenPath}`);
-    console.log(`You can now restart Homebridge to start using the plugin.\n`);
+    console.log('You can now restart Homebridge to start using the plugin.\n');
     return true;
   } catch (error) {
     if (error instanceof IECLoginError) {
@@ -66,7 +66,7 @@ function main() {
     console.error('Example: node login.js --user-id 123456789');
     console.error('        node login.js --user-id 123456789 --token ~/.custom/path.json');
     console.error('\nIf --token is not provided, token will be saved to:');
-    console.error(`  ~/.homebridge/iec-tokens/<user-id>.json`);
+    console.error('  ~/.homebridge/iec-tokens/<user-id>.json');
     process.exit(1);
   }
 

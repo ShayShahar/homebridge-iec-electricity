@@ -199,8 +199,8 @@ export class IecElectricityPlatform implements DynamicPlatformPlugin {
         // If token expired, clear it and prompt for re-authentication
         if (reading.error.includes('Token expired') || reading.error.includes('re-authenticate')) {
           this.log.warn(
-            `\n` +
-            `  IEC Electricity - Re-authentication required. Open the plugin settings in Config UI to log in again.\n`,
+            '\n' +
+            '  IEC Electricity - Re-authentication required. Open the plugin settings in Config UI to log in again.\n',
           );
           
           // Clear the client to force re-initialization
