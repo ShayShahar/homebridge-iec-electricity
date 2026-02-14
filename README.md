@@ -21,7 +21,7 @@ A Homebridge plugin that displays **Israel Electric Company (IEC)** electricity 
 npm install -g homebridge-iec-electricity
 ```
 
-Or install via Homebridge Config UI X.
+**From Homebridge Config UI:** If the plugin doesn’t appear in search, use **“Install a plugin by name”** (or the + / search field) and type the exact name: **`homebridge-iec-electricity`**. Then install and add the platform from the plugin’s settings.
 
 ### 2. Configure Homebridge
 
