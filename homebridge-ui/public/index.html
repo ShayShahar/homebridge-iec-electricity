@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IEC Electricity - Setup</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; padding: 20px; max-width: 480px; margin: 0 auto; }
+    .hidden { display: none; }
+    h2 { margin-top: 0; color: #333; }
+    .card { background: #f5f5f5; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; color: #444; }
+    input[type="text"] { width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 12px; }
+    button { background: #007aff; color: #fff; border: none; padding: 12px 20px; font-size: 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    button:hover { background: #0066cc; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .success { color: #34c759; font-weight: 600; }
+    .hint { font-size: 13px; color: #666; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div id="setupComplete" class="hidden card">
+    <h2>IEC Electricity</h2>
+    <p class="success">You are logged in. You can change options below and save.</p>
+    <button type="button" id="startOver">Log in with a different account</button>
+  </div>
+
+  <div id="setupRequired" class="hidden">
+    <div id="step1" class="card">
+      <h2>Log in to IEC</h2>
+      <p>Enter your Israeli ID (Teudat Zehut). An OTP code will be sent to your phone or email.</p>
+      <label for="userIdInput">Israeli ID (9 digits)</label>
+      <input type="text" id="userIdInput" inputmode="numeric" pattern="[0-9]*" maxlength="9" placeholder="123456789" autocomplete="off" />
+      <button type="button" id="step1Submit">Send OTP</button>
+    </div>
+
+    <div id="step2" class="hidden card">
+      <h2>Enter OTP code</h2>
+      <p>Enter the code you received (SMS or email). It expires in 10 minutes.</p>
+      <label for="otpInput">OTP code</label>
+      <input type="text" id="otpInput" inputmode="numeric" pattern="[0-9]*" maxlength="10" placeholder="123456" autocomplete="one-time-code" />
+      <button type="button" id="step2Submit">Verify &amp; save</button>
+    </div>
+  </div>
+
+  <script>
+    let pluginConfig = [];
+    let currentUserId = null;
+
+    (async () => {
+      pluginConfig = await homebridge.getPluginConfig();
+      if (!Array.isArray(pluginConfig)) pluginConfig = [];
+      const status = await homebridge.request('/status');
+      currentUserId = status.userId || null;
+
+      if (status.hasToken && currentUserId) {
+        document.getElementById('setupComplete').classList.remove('hidden');
+        document.getElementById('setupRequired').classList.add('hidden');
+        homebridge.showSchemaForm();
+      } else {
+        document.getElementById('setupRequired').classList.remove('hidden');
+        document.getElementById('setupComplete').classList.add('hidden');
+        if (currentUserId) {
+          const input = document.getElementById('userIdInput');
+          if (input) input.value = currentUserId;
+        }
+      }
+    })();
+
+    document.getElementById('startOver').addEventListener('click', async () => {
+      if (currentUserId) {
+        try {
+          await homebridge.request('/reset-login', { userId: currentUserId });
+        } catch (e) {
+          homebridge.toast.error(e.message || e.error || 'Reset failed.', 'Error');
+        }
+        currentUserId = null;
+      }
+      document.getElementById('setupComplete').classList.add('hidden');
+      document.getElementById('setupRequired').classList.remove('hidden');
+      document.getElementById('step1').classList.remove('hidden');
+      document.getElementById('step2').classList.add('hidden');
+    });
+
+    document.getElementById('step1Submit').addEventListener('click', async () => {
+      const userId = document.getElementById('userIdInput').value.trim().replace(/\D/g, '');
+      if (userId.length !== 9) {
+        homebridge.toast.error('Please enter a valid 9-digit Israeli ID.', 'Error');
+        return;
+      }
+
+      const btn = document.getElementById('step1Submit');
+      btn.setAttribute('disabled', 'disabled');
+      homebridge.showSpinner();
+
+      try {
+        const res = await homebridge.request('/request-otp', { userId });
+        if (res && res.success) {
+          homebridge.toast.success('OTP sent to your ' + (res.otpType || 'phone/email') + '.', 'Sent');
+          document.getElementById('step1').classList.add('hidden');
+          document.getElementById('step2').classList.remove('hidden');
+          document.getElementById('otpInput').value = '';
+          document.getElementById('otpInput').focus();
+        }
+      } catch (e) {
+        homebridge.toast.error(e.message || e.error || 'Failed to send OTP.', 'Error');
+      } finally {
+        homebridge.hideSpinner();
+        btn.removeAttribute('disabled');
+      }
+    });
+
+    document.getElementById('step2Submit').addEventListener('click', async () => {
+      const userId = document.getElementById('userIdInput').value.trim().replace(/\D/g, '');
+      const otpCode = document.getElementById('otpInput').value.trim();
+      if (userId.length !== 9) {
+        homebridge.toast.error('Invalid Israeli ID.', 'Error');
+        return;
+      }
+      if (!otpCode) {
+        homebridge.toast.error('Please enter the OTP code.', 'Error');
+        return;
+      }
+
+      const btn = document.getElementById('step2Submit');
+      btn.setAttribute('disabled', 'disabled');
+      homebridge.showSpinner();
+
+      try {
+        await homebridge.request('/verify-otp', { userId, otpCode });
+
+        currentUserId = userId;
+        let block = pluginConfig.find(c => c.platform === 'IecElectricity');
+        if (!block) {
+          block = { platform: 'IecElectricity', name: 'IEC Electricity' };
+          pluginConfig.push(block);
+          await homebridge.updatePluginConfig(pluginConfig);
+        }
+
+        homebridge.toast.success('Login successful! Save the configuration to apply.', 'Success');
+        document.getElementById('setupRequired').classList.add('hidden');
+        document.getElementById('setupComplete').classList.remove('hidden');
+        document.getElementById('setupComplete').querySelector('h2').textContent = 'IEC Electricity';
+        homebridge.showSchemaForm();
+      } catch (e) {
+        homebridge.toast.error(e.message || e.error || 'Verification failed.', 'Error');
+      } finally {
+        homebridge.hideSpinner();
+        btn.removeAttribute('disabled');
+      }
+    });
+  </script>
+</body>
+</html>
