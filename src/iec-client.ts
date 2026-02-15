@@ -91,6 +91,12 @@ export interface IecReading {
   error?: string;
 }
 
+/** Result of RemoteReadingRange: monthly kWh and optional cumulative meter reading (totalImport). */
+export interface CurrentMonthResult {
+  usage: number | null;
+  totalImport?: number;
+}
+
 export class IECError extends Error {
   constructor(public code: number, message: string) {
     super(message);
@@ -152,6 +158,8 @@ function isValidIsraeliId(id: string | number): boolean {
 export interface IecClientOptions {
   /** When true, log full JSON from each API call (for discovering fields for new sensors) */
   logApiData?: boolean;
+  /** When set, monthly-unavailable debug dumps are sent here (shows in Homebridge log) */
+  log?: (message: string) => void;
 }
 
 export class IecClient {
@@ -164,12 +172,14 @@ export class IecClient {
   private bpNumber?: string;
   private contractId?: string;
   private logApiData: boolean;
+  private log: (message: string) => void;
 
   constructor(private userId: string, options?: IecClientOptions) {
     if (!isValidIsraeliId(userId)) {
       throw new Error('User ID must be a valid Israeli ID');
     }
     this.logApiData = options?.logApiData ?? false;
+    this.log = options?.log ?? ((msg: string) => console.log(msg));
   }
 
   /** Log full API response when logApiData is enabled (for development / new sensors) */
@@ -818,13 +828,36 @@ export class IecClient {
         return { lastMeterReading: 0, error: 'No meter readings available' };
       }
 
-      const meter = lastMeters[0] as { meterReadings?: MeterReading[]; meter_readings?: MeterReading[] };
-      const meterReadings = meter.meterReadings ?? meter.meter_readings ?? [];
-      if (meterReadings.length === 0) {
+      // Collect all readings; each can have readingCode (e.g. "01" = manual, "02" = remote/automatic).
+      // Prefer remote/automatic (current) reading over manual so we match IEC site "current reading".
+      type R = { reading?: number; readingDate?: string; reading_date?: string; readingCode?: string; reading_code?: string };
+      const allReadings: R[] = [];
+      for (const meter of lastMeters) {
+        const list = (meter as { meterReadings?: R[]; meter_readings?: R[] }).meterReadings ?? (meter as { meterReadings?: R[]; meter_readings?: R[] }).meter_readings ?? [];
+        for (const r of list) {
+          allReadings.push(r);
+        }
+      }
+      if (allReadings.length === 0) {
         return { lastMeterReading: 0, error: 'No meter readings in response' };
       }
 
-      const lastReading = meterReadings[0];
+      const code = (r: R) => (r.readingCode ?? r.reading_code ?? '').toString();
+      // IEC API: readingCode "01" = manual, "02" (or similar) = remote/automatic (current). Prefer current.
+      const REMOTE_CODES = ['02', '03', '2', '3'];
+      const remoteOnly = allReadings.filter((r) => REMOTE_CODES.includes(code(r)));
+      const candidates = remoteOnly.length > 0 ? remoteOnly : allReadings;
+      if (this.logApiData && allReadings.length > 1) {
+        const codes = [...new Set(allReadings.map(code))].filter(Boolean);
+        console.log(`[IEC API] LastMeterReading: ${allReadings.length} readings, codes=${codes.join(',')}, using ${remoteOnly.length > 0 ? 'remote' : 'all'}`);
+      }
+
+      const sorted = [...candidates].sort((a, b) => {
+        const dateA = a.readingDate ?? a.reading_date ?? '';
+        const dateB = b.readingDate ?? b.reading_date ?? '';
+        return dateB.localeCompare(dateA);
+      });
+      const lastReading = sorted[0];
       const value = lastReading.reading ?? 0;
       const readingDate = lastReading.readingDate ?? lastReading.reading_date;
 
@@ -900,9 +933,15 @@ export class IecClient {
   }
 
   /**
-   * Get current month usage from remote reading API
+   * Get current month usage from remote reading API.
+   * API requires lastInvoiceDate (e.g. from last meter reading date).
+   * Also extracts totalImport (cumulative meter reading) when present — use for "last meter reading" to match IEC site.
    */
-  async getCurrentMonthUsage(bpNumber?: string, contractId?: string): Promise<number | null> {
+  async getCurrentMonthUsage(
+    bpNumber?: string,
+    contractId?: string,
+    lastInvoiceDate?: string,
+  ): Promise<CurrentMonthResult> {
     await this.checkToken();
 
     if (!this.token) {
@@ -913,35 +952,48 @@ export class IecClient {
     const contract = contractId || this.contractId;
 
     if (!bp || !contract) {
-      console.log(`[IEC Client] Cannot get monthly usage: bp=${!!bp}, contract=${!!contract}`);
-      return null;
+      this.log(`[IEC] Monthly: skipped (bp=${!!bp}, contract=${!!contract})`);
+      return { usage: null };
     }
 
     try {
-      // Get devices to find meter serial and code (API returns deviceNumber, deviceCode)
+      this.log(`[IEC] Monthly: fetching devices for contract ${contract}`);
       const devices = await this.getDevices(contract);
       const first = devices[0];
       const meterSerial = first?.serialNumber ?? first?.deviceNumber;
       const meterCode = first?.deviceCode;
-      
-      if (devices.length === 0 || !meterSerial || !meterCode) {
-        console.log(`[IEC Client] No device info for monthly usage: devices=${devices.length}, serial=${!!meterSerial}, code=${!!meterCode}`);
-        return null;
-      }
-      
-      console.log(`[IEC Client] Using meter serial=${meterSerial}, code=${meterCode} for monthly usage`);
 
-      // Calculate first day of current month
+      if (devices.length === 0 || !meterSerial || !meterCode) {
+        const firstKeys = first ? Object.keys(first).join(',') : 'none';
+        this.log(`[IEC] Monthly: no meter info (devices=${devices.length}, serial=${!!meterSerial}, code=${!!meterCode}, first keys: ${firstKeys})`);
+        return { usage: null };
+      }
+
+      this.log(`[IEC] Monthly: using meter serial=${meterSerial} code=${meterCode}`);
+
+      // First day of current month (local date, YYYY-MM-DD)
       const now = new Date();
-      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const fromDate = firstDayOfMonth.toISOString().split('T')[0]; // YYYY-MM-DD
+      const y = now.getFullYear();
+      const m = now.getMonth();
+      const fromDate = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+
+      // API requires Last Invoice Date (use last meter reading date or last day of previous month)
+      const lastInvDate = lastInvoiceDate
+        ? undefined
+        : new Date(y, m, 0); // last day of previous month
+      const lastInv =
+        lastInvoiceDate ??
+        (lastInvDate
+          ? `${lastInvDate.getFullYear()}-${String(lastInvDate.getMonth() + 1).padStart(2, '0')}-${String(lastInvDate.getDate()).padStart(2, '0')}`
+          : '');
 
       const url = GET_REMOTE_READING_URL.replace('{contract_id}', contract);
-      console.log(`[IEC Client] Fetching monthly usage from: ${url}, fromDate: ${fromDate}`);
+      this.log(`[IEC] Monthly: POST ${url} fromDate=${fromDate} lastInvoiceDate=${lastInv}`);
 
       const requestBody = {
         contractNumber: contract,
-        fromDate: fromDate,
+        fromDate,
+        lastInvoiceDate: lastInv,
         resolution: 3, // MONTHLY
         smartMetersList: [{
           meterKind: 'Consumption',
@@ -961,40 +1013,90 @@ export class IecClient {
 
       if (!response.ok) {
         const errText = await response.text().catch(() => '');
-        console.error(`[IEC Client] Failed to get monthly usage: ${response.status} ${errText.substring(0, 300)}`);
-        return null;
+        this.log(`[IEC] Monthly: API error ${response.status} ${errText.substring(0, 200)}`);
+        return { usage: null };
       }
 
       const raw = (await response.json()) as Record<string, unknown>;
       this.logApiResponse('RemoteReadingRange (monthly consumption)', raw);
       const data = (raw.data ?? raw) as Record<string, unknown>;
-      const meterList = (data.meterList ?? data.meter_list ?? []) as Array<Record<string, unknown>>;
-      
+      const meterList = (data.meterList ?? data.meter_list ?? data.meters ?? []) as Array<Record<string, unknown>>;
+
       if (meterList.length === 0) {
-        const keys = Object.keys(raw).join(',');
-        console.log(`[IEC Client] Monthly usage response has no meterList. Top-level keys: ${keys}`);
-        return null;
+        this.log(`[IEC] Monthly: response has no meterList. Top-level keys: ${Object.keys(raw).join(',')}`);
+        this.log(`[IEC] Monthly: full response:\n${JSON.stringify(raw, null, 2)}`);
+        return { usage: null };
       }
 
       const meter = meterList[0];
-      type FutureInfo = { futureConsumption?: number; future_consumption?: number };
-      const futureInfo = (meter.futureConsumptionInfo ?? meter.future_consumption_info) as FutureInfo | undefined;
-      const usage =
-        (futureInfo?.futureConsumption ?? futureInfo?.future_consumption) as number | undefined ??
+      // Prefer totalConsumptionForPeriod: we request fromDate=1st of month, so this is current month in kWh (matches IEC site).
+      // Then periodConsumptions (for MONTHLY resolution, one entry per month; take current month or last).
+      // futureConsumption is "since last invoice" and may span more than current month.
+      const totalForPeriod =
         (meter.totalConsumptionForPeriod as number | undefined) ??
-        (meter.total_consumption_for_period as number | undefined) ??
-        null;
-      
-      if (usage !== null && typeof usage === 'number') {
-        console.log(`[IEC Client] Current month usage: ${usage} kWh`);
-      } else {
-        console.log(`[IEC Client] Monthly usage not in response. Meter keys: ${Object.keys(meter).join(',')}`);
+        (meter.total_consumption_for_period as number | undefined);
+      let usage: number | null =
+        typeof totalForPeriod === 'number' ? totalForPeriod : null;
+
+      if (usage === null) {
+        const periodList = (meter.periodConsumptions ?? meter.period_consumptions ?? []) as Array<Record<string, unknown>>;
+        if (periodList.length > 0) {
+          const now = new Date();
+          const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+          const forCurrentMonth = periodList.find((p) => {
+            const interval = (p.interval as string) ?? '';
+            return interval.startsWith(currentMonthStr);
+          });
+          const lastPeriod = periodList[periodList.length - 1];
+          const r = forCurrentMonth ?? lastPeriod;
+          usage = (r.consumption ?? r.value ?? r.reading ?? r.totalConsumption) as number | undefined ?? null;
+        }
       }
-      
-      return typeof usage === 'number' ? usage : null;
+
+      if (usage === null) {
+        type FutureInfo = { futureConsumption?: number; future_consumption?: number };
+        const futureInfo = (meter.futureConsumptionInfo ?? meter.future_consumption_info) as FutureInfo | undefined;
+        usage =
+          (futureInfo?.futureConsumption ?? futureInfo?.future_consumption) as number | undefined ??
+          (meter.consumption as number | undefined) ??
+          (meter.reading as number | undefined) ??
+          null;
+      }
+
+      if (usage === null) {
+        const readings = (meter.readings ?? meter.periodReadings ?? meter.consumptionReadings ?? []) as Array<Record<string, unknown>>;
+        if (readings.length > 0) {
+          const r = readings[readings.length - 1];
+          usage = (r.consumption ?? r.value ?? r.reading ?? r.totalConsumption) as number | undefined ?? null;
+        }
+      }
+
+      // totalImport = cumulative meter reading (matches IEC site "last reading"); prefer over LastMeterReading API.
+      type FutureInfo = { totalImport?: number; total_import?: number };
+      const futureInfo = (meter.futureConsumptionInfo ?? meter.future_consumption_info) as FutureInfo | undefined;
+      const totalImport =
+        (futureInfo?.totalImport ?? futureInfo?.total_import) as number | undefined ??
+        (meter.totalImport as number | undefined) ??
+        (meter.total_import as number | undefined);
+
+      if (usage !== null && typeof usage === 'number') {
+        this.log(`[IEC] Monthly: current month usage=${usage} kWh`);
+      } else {
+        this.log(`[IEC] Monthly: usage not found. Meter keys: ${Object.keys(meter).join(',')}`);
+        this.log(`[IEC] Monthly: full API response:\n${JSON.stringify(raw, null, 2)}`);
+        this.log(`[IEC] Monthly: first meter:\n${JSON.stringify(meter, null, 2)}`);
+      }
+      if (typeof totalImport === 'number') {
+        this.log(`[IEC] Monthly: totalImport (current meter)=${totalImport} kWh`);
+      }
+
+      return {
+        usage: typeof usage === 'number' ? usage : null,
+        totalImport: typeof totalImport === 'number' ? totalImport : undefined,
+      };
     } catch (error) {
-      console.error(`[IEC Client] Error getting monthly usage: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
+      this.log(`[IEC] Monthly: error ${error instanceof Error ? error.message : String(error)}`);
+      return { usage: null };
     }
   }
 
@@ -1017,11 +1119,19 @@ export class IecClient {
       const contractId = contracts[0].contractId ?? contracts[0].contract_id;
       
       const reading = await this.getLastMeterReading(bp, contractId);
-      
-      // Also fetch current month usage
-      const currentMonthUsage = await this.getCurrentMonthUsage(bp, contractId).catch(() => null);
-      if (currentMonthUsage !== null) {
-        reading.currentMonthUsage = currentMonthUsage;
+
+      // Fetch current month usage (pass last reading date for API's lastInvoiceDate).
+      // RemoteReadingRange also returns totalImport = current cumulative meter reading; use it for "last meter reading" so it matches IEC site (LastMeterReading API often returns manual reading only).
+      const monthlyResult = await this.getCurrentMonthUsage(
+        bp,
+        contractId,
+        reading.readingDate,
+      ).catch(() => ({ usage: null } as CurrentMonthResult));
+      if (monthlyResult.usage !== null) {
+        reading.currentMonthUsage = monthlyResult.usage;
+      }
+      if (typeof monthlyResult.totalImport === 'number') {
+        reading.lastMeterReading = monthlyResult.totalImport;
       }
       
       return reading;

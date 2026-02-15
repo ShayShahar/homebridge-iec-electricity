@@ -2,7 +2,7 @@
   "name": "homebridge-iec-electricity",
   "displayName": "Homebridge IEC Electricity",
   "type": "module",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": false,
   "description": "Homebridge plugin to display Israel Electric Company (IEC) electricity usage as HomeKit Light Sensors",
   "author": "Shay Shahar",

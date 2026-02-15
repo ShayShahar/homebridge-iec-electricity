@@ -65,7 +65,7 @@ export class IecElectricityPlatform implements DynamicPlatformPlugin {
 
     const mainDevice = {
       uniqueId: 'iec-electricity-main',
-      displayName: 'IEC Total Reading (kWh)',
+      displayName: 'Last Meter kWh',
     };
 
     if (mainAccessory) {
@@ -87,7 +87,7 @@ export class IecElectricityPlatform implements DynamicPlatformPlugin {
 
     const monthlyDevice = {
       uniqueId: 'iec-electricity-monthly',
-      displayName: 'IEC Monthly Usage (kWh)',
+      displayName: 'Current Month Usage kWh',
     };
 
     if (monthlyAccessory) {
@@ -117,6 +117,9 @@ export class IecElectricityPlatform implements DynamicPlatformPlugin {
             `IEC data: total=${reading.lastMeterReading ?? 0} kWh` +
             (monthly !== undefined && monthly !== null ? `, monthly=${monthly} kWh` : ', monthly=unavailable'),
           );
+          if ((this.config as IecPlatformConfig).logApiData) {
+            this.log.info(`[IEC] Full retrieved reading (logApiData): ${JSON.stringify(reading, null, 2)}`);
+          }
           this.accessories.forEach((accessory) => {
             const handler = (accessory as PlatformAccessory & { handler?: IecElectricityAccessory }).handler;
             if (handler) {
@@ -167,7 +170,10 @@ export class IecElectricityPlatform implements DynamicPlatformPlugin {
     try {
       // Initialize client if not already done
       if (!this.iecClient) {
-        this.iecClient = new IecClient(userId, { logApiData: !!cfg.logApiData });
+        this.iecClient = new IecClient(userId, {
+          logApiData: !!cfg.logApiData,
+          log: (msg) => this.log.info(msg),
+        });
         try {
           await this.iecClient.loadTokenFromFile(tokenPath);
           this.log.debug(`Loaded token from ${tokenPath}`);

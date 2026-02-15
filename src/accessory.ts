@@ -26,16 +26,22 @@ export class IecElectricityAccessory {
     this.accessory
       .getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Israel Electric Company')
-      .setCharacteristic(this.platform.Characteristic.Model, readingType === 'monthly' ? 'IEC Monthly Usage' : 'IEC Meter')
+      .setCharacteristic(
+        this.platform.Characteristic.Model,
+        readingType === 'monthly'
+          ? 'Current month consumption (same as on IEC site)'
+          : 'Last meter reading – cumulative dial (same as on IEC site)',
+      )
       .setCharacteristic(this.platform.Characteristic.SerialNumber, readingType === 'monthly' ? 'IEC-MONTHLY' : 'IEC-001');
 
     this.lightSensorService =
       this.accessory.getService(this.platform.Service.LightSensor) ??
       this.accessory.addService(this.platform.Service.LightSensor);
 
-    const displayName = readingType === 'monthly' 
-      ? 'IEC Monthly Usage (kWh)' 
-      : 'IEC Total Reading (kWh)';
+    const displayName =
+      readingType === 'monthly'
+        ? 'Current Month Usage kWh'
+        : 'Last Meter kWh';
     this.lightSensorService
       .setCharacteristic(this.platform.Characteristic.Name, displayName);
 

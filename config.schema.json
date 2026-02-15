@@ -3,8 +3,8 @@
   "pluginType": "platform",
   "singular": true,
   "customUi": true,
-  "headerDisplay": "IEC Electricity – Israel Electric Company",
-  "footerDisplay": "Log in with your Israeli ID to see meter data in HomeKit",
+  "headerDisplay": "Two sensors: Last Meter Reading = cumulative dial (like IEC site). Current Month = consumption this month in kWh.",
+  "footerDisplay": "Log in with your Israeli ID to see meter data in HomeKit.",
   "schema": {
     "type": "object",
     "required": ["name"],
