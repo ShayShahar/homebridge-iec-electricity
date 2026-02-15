@@ -833,7 +833,8 @@ export class IecClient {
       type R = { reading?: number; readingDate?: string; reading_date?: string; readingCode?: string; reading_code?: string };
       const allReadings: R[] = [];
       for (const meter of lastMeters) {
-        const list = (meter as { meterReadings?: R[]; meter_readings?: R[] }).meterReadings ?? (meter as { meterReadings?: R[]; meter_readings?: R[] }).meter_readings ?? [];
+        const m = meter as { meterReadings?: R[]; meter_readings?: R[] };
+        const list = m.meterReadings ?? m.meter_readings ?? [];
         for (const r of list) {
           allReadings.push(r);
         }
@@ -1121,7 +1122,8 @@ export class IecClient {
       const reading = await this.getLastMeterReading(bp, contractId);
 
       // Fetch current month usage (pass last reading date for API's lastInvoiceDate).
-      // RemoteReadingRange also returns totalImport = current cumulative meter reading; use it for "last meter reading" so it matches IEC site (LastMeterReading API often returns manual reading only).
+      // RemoteReadingRange also returns totalImport (current cumulative meter); use it for
+      // "last meter reading" so it matches IEC site (LastMeterReading API often returns manual only).
       const monthlyResult = await this.getCurrentMonthUsage(
         bp,
         contractId,
